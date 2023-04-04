@@ -1,0 +1,470 @@
+add_library('minim')
+import os
+import datetime
+import csv
+import random
+
+PATH = os.getcwd()
+
+def setup():
+    size(game.w, game.h)
+
+GRAVITY_ACCELERATION = 0.2
+
+class Ground:
+    def __init__(self, x, y):
+        self.x1 = x
+        self.y1 = y
+        self.x2 = 0
+        self.y2 = 0
+        self.d = [[0, 700], [100, 700], [200, 650], [300, 700], [500, 700], [650, 660], [750, 700], [850, 700],
+                  [950, 660],[990, 700], [1100, 700], [1200, 650], [1300, 700],[1400, 700],[1500, 650], [1800, 700], [2000,700], [2350, 610], [2500, 700], [2750, 700]]
+        self.m = 0
+        self.y4 = self.d[0][1]
+        self.flag=loadImage(PATH + "/images/flag.png")
+        self.prevm = 0
+
+    def update(self): #calculating slope and the respective y coordinate using y=m(x-x1)
+        for i in range(len(self.d) - 1):
+            if self.d[i][0] <= game.bike.x <= self.d[i + 1][0]:
+                self.x1 = self.d[i][0]
+                self.y1 = self.d[i][1]
+                self.x2 = self.d[i + 1][0]
+                self.y2 = self.d[i + 1][1]
+                self.m = float(self.y2 - self.y1) / (self.x2 - self.x1)
+                self.y4 = self.m * (game.bike.x - self.x1) + self.y1
+                self.prevm = float(self.d[i][1] - self.d[i-1][1]) / (self.d[i][0] - self.d[i-1][0])
+        for i in range(len(self.d)):#moving ground
+            self.d[i][0] -= game.bike.vx
+    
+
+    def display(self):
+        self.update()
+
+        for i in range(len(self.d) - 1):
+            stroke(255)
+            strokeWeight(15)
+            line(self.d[i][0], self.d[i][1], self.d[i + 1][0], self.d[i + 1][1])#drawing each part of the ground
+        if game.bike.x>=1000:
+            image(self.flag, self.d[-1][0], 610,100,100)
+
+class Bike:
+    def __init__(self, x, y, r, g):
+        self.x = x
+        self.y = y 
+        self.r = r
+        self.vx = 0
+        self.vy = 0
+        self.g = g
+        self.acc = 0
+        self.in_air = False
+        self.counter = 0
+        self.keyHandler = {LEFT: False, RIGHT: False, UP: False, DOWN: False}
+        self.img=loadImage(PATH + "/images/bike2.png")
+        self.projectile = {'initial_velocity': 0,'angle': 0,'sin': None,'cos': None,'time': 0}
+        self.points=0
+    def update(self):
+        accelerated = self.keyHandler[LEFT] or self.keyHandler[RIGHT]
+        if self.vx == 0 and not accelerated:
+            return
+        
+        #normal acceleration will not work while suspended in air
+        if not self.in_air:
+            ##negative velocity if going left or decelerating
+            if self.keyHandler[LEFT] or (not accelerated and self.vx > 0):
+                if accelerated:
+                    self.vx -= 0.3
+                else:
+                    self.vx -= 0.1
+            elif self.keyHandler[RIGHT] or (not accelerated and self.vx < 0):
+                #positive velocity if going right or accelerating
+                if accelerated:
+                    self.vx += 0.3
+                else:
+                    self.vx+= 0.1
+            self.vx = max(min(self.vx, 50), -50)
+    
+        if self.in_air:
+            return self.process_in_air()
+        if self.vx < 0 and self.y < game.ground.y2 and game.ground.m < 0 or (self.vx > 0 and self.y > game.ground.y1 and game.ground.m > 0):
+            #jump if bike is at the top of a cliff
+            #checking y1 when going right because ground index changes at the cliff, so taking previous height : y1
+            return self.jump()
+    
+        else:
+            return self.process_on_ground()
+        
+    def checkbg(self):
+        if self.x>=game.w//3:
+            game.x-=0.5
+            game.g-=0.5
+    
+    def process_on_ground(self):
+        accelerated = self.keyHandler[LEFT] or self.keyHandler[RIGHT]
+        if game.ground.m > 0:
+            if accelerated:
+               self.vx += GRAVITY_ACCELERATION + 0.4
+            else:
+               self.vx += GRAVITY_ACCELERATION
+            self.y = game.ground.y4
+        elif game.ground.m < 0:
+            if accelerated:
+                self.vx -= GRAVITY_ACCELERATION 
+            else:
+                self.vx -= GRAVITY_ACCELERATION + 0.4
+            self.y = game.ground.y4
+        self.x += self.vx
+        
+        #calculating angle of the slope the bike is on since when we jump the ground has changed, hence slope too is of the next piece of ground
+        self.projectile['angle'] = abs(atan(game.ground.m)) *100
+
+    def process_in_air(self):
+        #to count every frame 
+        self.projectile['time'] += 1
+        self.vx = self.projectile['initial_velocity'] * self.projectile['cos']
+        self.vy = (self.projectile['initial_velocity'] * self.projectile['sin']) - (GRAVITY_ACCELERATION * self.projectile['time'])
+        self.x += self.vx 
+        self.y -= self.vy/3
+        if self.y!=game.ground.y4-20 and not(game.ground.m>0):
+            if self.projectile['angle']<35:
+                self.projectile['angle'] += 1
+            else:
+                self.projectile['angle'] -= 1
+                
+        
+
+        #if bike touches the ground, reset projectile and jump calculations
+        if self.y > game.ground.y4:
+            self.y = game.ground.y4
+            self.vy = 0
+    
+            self.in_air = False
+            self.projectile['initial_velocity']= 0
+            self.projectile['sin']= None
+            self.projectile['cos']= None
+            self.projectile['time']= 0
+        
+    def jump(self):
+        self.in_air = True
+        self.projectile['time'] = 0
+        self.projectile['sin'] = sin(self.projectile['angle'])
+        self.projectile['cos'] = abs(cos(self.projectile['angle']))
+        self.projectile['initial_velocity'] = self.vx
+    
+    def accelerate(self):
+        self.acc = 1
+
+    def deccelerate(self):
+        self.acc = -1
+        
+    def checkwin(self):
+        if self.x >= game.ground.d[-1][0]:
+            game.win=True  
+    
+        
+    def checkcol(self):
+        for s in game.coins:
+            if ((self.x-s.xcoin)**2+(self.y-s.ycoin)**2)**0.5 <= 80:
+                self.points+=1
+                tmp = game.coins.remove(s)
+                del tmp 
+    
+    def display(self):
+        self.update()
+        self.checkbg()
+        self.checkwin()
+        self.checkcol()
+        stroke(0)
+        noFill()
+        pushMatrix()
+        translate(self.x-40,self.y-6.5*self.r)
+        rotate(self.projectile['angle'] / -100)
+        #rotate(atan(game.ground.m))
+        image(self.img, 0, 0,80,80)
+        popMatrix()
+        
+class Coin:
+    def __init__ (self,xcoin,ycoin):
+        self.coinimg = loadImage(PATH + "/images/coin.png")
+        self.vxcoin = 1
+        self.xcoin = xcoin
+        self.ycoin = ycoin
+        
+    def update(self):
+        self.xcoin -=game.bike.vx
+    def display(self):
+        self.update()
+        image(self.coinimg, self.xcoin, self.ycoin, 30, 30)
+        
+class Game:
+    def __init__(self, w, h, g):
+        self.w = w
+        self.h = h
+        self.g = g
+        self.ground = Ground(0, 700)
+        self.bike = Bike(0, 700, 10, g)
+        self.enter = False
+        self.win=False
+        self.state = "menu"
+        self.state1 = "ny"
+        self.bg=[]
+        self.menubg = loadImage(PATH + "/images/cityscape.png")
+        self.menutext = loadImage(PATH + "/images/bgtext.png")
+        self.menunyc = loadImage(PATH + "/images/nyu_newyork.jpeg")
+        self.menuad = loadImage(PATH + "/images/nyu_ad.jpeg")
+        self.menush = loadImage(PATH + "/images/nyu_shanghai.jpeg")
+        self.leaderboard = loadImage(PATH + "/images/LEADER.png")
+        self.howto=loadImage(PATH + "/images/howto.png")
+        self.ins=loadImage(PATH + "/images/1.png")
+        self.youwin=loadImage(PATH + "/images/3.png")
+        self.leaderb=loadImage(PATH + "/images/2.png")
+        self.back=loadImage(PATH + "/images/back.png")
+        self.time_dic = {}
+        self.sorted_time_dic = {}
+        self.converted_time_dic = {}
+        self.file1 = 0
+        self.file2 = 0
+        self.file3 = 0
+        self.file4 = 0
+        self.bgm = minim.loadFile(PATH + '/sounds/bgm.mp3')
+        self.startm=minim.loadFile(PATH + '/sounds/start.mp3')
+        self.success=minim.loadFile(PATH + '/sounds/success.mp3')
+        self.score={}
+        self.nyc= loadImage(PATH + "/images/new_york_background.png")
+        self.ad= loadImage(PATH + "/images/ad.png")
+        self.shng=loadImage(PATH + "/images/shnghai.png")
+        self.x=0
+        self.start_time=0
+        self.end_time=0
+        self.name = "Enter Name: "
+        self.move = 0
+        self.coins = []
+        self.pauseGame = False
+        
+        for i in range(random.randint(30,40)):
+            self.coins.append(Coin(100*i+random.randint(0,10),600))
+        
+
+   
+    def display(self):
+    
+        try:
+            if self.state == "menu":
+                self.startm.setGain(80)
+                self.startm.play()    
+                self.startm.getGain()
+                
+                image(self.menubg, 0, 0, 2000, 800)
+                image(self.menutext, 680, 30)
+                image(self.menunyc, 570, 300, 200, 300)
+                image(self.menuad, 840, 300, 330, 300)
+                image(self.menush, 1240, 300, 200, 300)
+                image(self.leaderboard, 1020, 690, 300, 50)
+                image(self.howto, 700, 690, 300, 50)
+                
+                
+                textSize(30)
+                fill(0)
+                text(self.name,5, 50)
+                
+                if 570 <= mouseX <= 570+200 and 300 <= mouseY <= 300+300:
+                    noFill()
+                    stroke(255, 255, 255)
+                    strokeWeight(6)
+                    rect(570, 300, 200, 300)
+                elif 840 <= mouseX <= 840+330 and 300 <= mouseY <= 300+300:
+                    noFill()
+                    stroke(255, 255, 255)
+                    strokeWeight(6)
+                    rect(840, 300, 330, 300)
+                elif 1240 <= mouseX <= 1240+200 and 300 <= mouseY <= 300+300:
+                    noFill()
+                    stroke(255, 255, 255)
+                    strokeWeight(6)
+                    rect(1240, 300, 200, 300)
+                elif 700 <= mouseX <= 700+300 and 690 <= mouseY <= 690+50:
+                    noFill()
+                    stroke(255, 102, 196)
+                    strokeWeight(6)
+                    rect(700, 690, 300, 50)
+                elif 1020 <= mouseX <= 1020+300 and 690 <= mouseY <= 690+50:
+                    noFill()
+                    stroke(255, 102, 196)
+                    strokeWeight(6)
+                    rect(1020, 690, 300, 50)
+                
+                
+            elif self.state=="play": 
+                if self.state1 == "ny":
+                    image(self.nyc,self.x,0,2000,800)
+                    self.startm.close()
+                elif self.state1 == "ad":
+                    image(self.ad,self.x,0,2000,800)
+                    self.startm.close()
+                elif self.state1 == "sh":
+                    image(self.shng,self.x,0,2000,800)
+                    self.startm.close()
+                self.bgm.setGain(80)
+                self.bgm.play()    
+                self.bgm.getGain()
+                self.ground.display()
+                self.bike.display()
+                for s in self.coins:
+                    s.display()
+                stroke(0, 0, 0)
+                textSize(20)
+                
+                    
+                if self.win == True:    
+                    self.end_time=(millis()/1000)%60
+                    self.state="end"
+            
+            elif self.state=="end":
+                self.startm.close()
+                self.bgm.close()
+                self.success.setGain(80)
+                self.success.play()    
+                self.success.getGain()
+                image(self.youwin,0,0)
+                textSize(40)
+                fill(255)
+                text("Click anywhere to return to the main menu",game.w//2-300,500)
+                text("Time: "+str(self.end_time)+" seconds",game.w//2-50,600)
+                text("Score: "+str(self.bike.points)+" points",game.w//2-50,700)
+                
+                #add new score to leaderboard
+                self.time_dic[self.name[12:]]=self.end_time
+                self.file1 = open("scores.csv", "a")
+                self.file1.close()
+                self.file2 = open("scores.csv", "r")
+                for linee in self.file2:
+                    linee = linee.strip().split(",")
+                    if linee[0] not in self.file2:
+                        self.time_dic[linee[0]] = linee[1]
+                self.file2.close()
+                
+                
+            elif self.state=="leader":
+                background(177,156,217)
+                image(self.leaderb,0,0)
+                self.move=game.h//2
+                self.file4 = open("scores.csv", "r")
+                for linee in self.file4:
+                    linee = linee.strip().split(",")
+                    self.time_dic[linee[0]] = linee[1]
+                text("Name                   Score", 1000-100, self.move)
+                self.l=list(self.time_dic.values())
+                self.l.sort()
+                for i in self.l[:5]:
+                    for keyss in self.time_dic.keys():
+                        if i==self.time_dic[keyss]:
+                            textSize(20)
+                            fill(0)
+                            text(" "+str(keyss.strip())+"                          "+str(self.time_dic[keyss]),1000-100,self.move+60)
+                            self.move+=60
+                image(self.back,game.w//2-50,10, 200, 40)
+                self.file4.close()
+                
+            elif self.state=="howto":
+                image(self.ins,0,0)
+                textSize(20)
+                fill(0)
+                image(self.back,game.w//2-50,10, 200, 40)
+                
+            
+        except Exception as e:
+            print(e)
+
+minim=Minim(this)
+game = Game(2000, 800, 700)
+
+def mouseClicked():
+    
+    if game.state == "menu":
+        if 570 <= mouseX <= 570+200 and 300 <= mouseY <= 300+300:
+            game.state = "play"
+            game.state1 == "ny"
+        elif 840 <= mouseX <= 840+330 and 300 <= mouseY <= 300+300:
+            game.state = "play"
+            game.state1 = "ad"
+        elif 1240 <= mouseX <= 1240+200 and 300 <= mouseY <= 300+300:
+            game.state = "play"
+            game.state1 = "sh"
+        elif 1020 <= mouseX <= 1020+300 and 690 <= mouseY <= 690+50:
+            game.state="leader"
+        elif 700 <= mouseX <= 700+300 and 690 <= mouseY <= 690+50:
+            game.state="howto"
+    
+    if game.state=="howto":
+        if game.w//2-50 <= mouseX <= (game.w//2-50)+200 and 10 <= mouseY <= 10+40:
+            game.__init__(2000, 800, 700)
+            return
+    if game.state=="leader":
+        if game.w//2-50 <= mouseX <= (game.w//2-50)+200 and 10 <= mouseY <= 10+40:
+            game.__init__(2000, 800, 700)
+            return
+        
+    
+        
+        
+        
+    if game.state=="end":
+        game.file3 = open("scores.csv","a")
+        for score in game.time_dic:
+            game.file3.write("{0},{1}\n".format(game.name[12:].strip(), game.time_dic[game.name[12:]]))
+        game.file3.close()
+        game.__init__(2000, 800, 700)
+        return
+    
+def draw():
+        try:
+            if not game.pauseGame:
+                background(255)
+                game.display()
+        
+        except Exception as e:
+            print(e)
+
+def keyPressed():
+    if keyCode == LEFT:
+        game.bike.accelerate()
+        game.bike.keyHandler[LEFT] = True
+    if keyCode == RIGHT:
+        game.bike.accelerate()
+        game.bike.keyHandler[RIGHT] = True
+    if keyCode == UP:
+        game.bike.keyHandler[UP] = True
+        game.bike.projectile['angle'] += 10
+    if keyCode == DOWN:
+        game.bike.keyHandler[DOWN] = True
+        print("now")
+        game.bike.projectile['angle'] -= 10
+    if keyCode == 13:
+        game.enter=True
+    if keyCode ==32:
+        game.pauseGame = not game.pauseGame
+        game.bgm.pause()
+        game.startm.pause()
+        background(0)
+        textSize (100)
+        fill (255, 105, 180)
+        text ("PAUSED", game.w//2, game.h//2)
+def keyReleased():
+    if keyCode == LEFT:
+        game.bike.deccelerate()
+        game.bike.keyHandler[LEFT] = False
+    if keyCode == RIGHT:
+        game.bike.deccelerate()
+        game.bike.keyHandler[RIGHT] = False
+    if keyCode == UP:
+        game.bike.keyHandler[UP] = False
+    if keyCode == DOWN:
+        game.bike.keyHandler[DOWN] = False
+    if keyCode ==32:
+        game.bgm.play()
+        
+def keyTyped():
+    #print("typed %s %d" % (key, keyCode))
+    game.name=game.name+str(key)
+    if game.enter==True:
+        game.time_dic[game.name[12:]]==game.end_time
